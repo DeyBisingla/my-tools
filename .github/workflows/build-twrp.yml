@@ -26,6 +26,19 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
+    - name: Validate inputs
+      run: |
+        echo "Device codename: ${{ github.event.inputs.device_codename }}"
+        echo "TWRP branch: ${{ github.event.inputs.twrp_branch }}"
+        if [ -z "${{ github.event.inputs.device_codename }}" ]; then
+          echo "ERROR: device_codename is required"
+          exit 1
+        fi
+        if [ -z "${{ github.event.inputs.twrp_branch }}" ]; then
+          echo "ERROR: twrp_branch is required"
+          exit 1
+        fi
+    
     - name: Checkout device tree
       uses: actions/checkout@v4
       with:
@@ -53,7 +66,9 @@ jobs:
         mkdir twrp && cd twrp
         git config --global user.email "actions@github.com"
         git config --global user.name "GitHub Actions"
-        repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b ${{ github.event.inputs.twrp_branch }}
+        BRANCH="${{ github.event.inputs.twrp_branch }}"
+        echo "Building for TWRP branch: $BRANCH"
+        repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b "$BRANCH"
         repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
         
     - name: Clone device tree
