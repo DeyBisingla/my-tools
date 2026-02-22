@@ -10,6 +10,7 @@ Workflow otomatis untuk generate device tree dan build TWRP.
 - Input:
   - `vendor_boot_url`: URL download vendor_boot.img
   - `device_name`: (optional) nama device jika auto-detect gagal
+  - `extract_first`: Centang untuk ekstrak vendor_boot dulu (recommended)
 - Result: Device tree otomatis di-commit ke repo
 
 ### 2. Build TWRP
@@ -49,6 +50,11 @@ python transsion_twrp_gen_vendor_boot.py vendor_boot.img -o output
 **Error: can't open file transsion_twrp_gen_vendor_boot.py**
 - Script belum diupload ke repo
 - Upload `transsion_twrp_gen_vendor_boot.py` ke root repo (bukan di folder)
+
+**Error: No recovery ramdisk found**
+- vendor_boot.img perlu diekstrak dulu sebelum diproses
+- Centang opsi `Extract vendor_boot dulu dengan magiskboot` saat run workflow (default: true)
+- Atau ekstrak manual dulu dengan magiskboot/Android Image Kitchen lalu upload folder hasil ekstrak
 
 **Build gagal**
 - Pastikan device tree sudah di-generate terlebih dahulu

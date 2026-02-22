@@ -9,6 +9,10 @@ on:
       device_name:
         description: 'Device name (optional)'
         required: false
+      extract_first:
+        description: 'Extract vendor_boot dulu dengan magiskboot'
+        type: boolean
+        default: true
 
 jobs:
   generate:
@@ -23,6 +27,19 @@ jobs:
       with:
         python-version: '3.10'
     
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cpio gzip unzip wget
+        
+    - name: Download Magiskboot
+      if: github.event.inputs.extract_first == 'true'
+      run: |
+        wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+        unzip -j Magisk-v27.0.apk lib/x86_64/libmagiskboot.so -d .
+        mv libmagiskboot.so magiskboot
+        chmod +x magiskboot
+    
     - name: Verify script exists
       run: |
         if [ ! -f "transsion_twrp_gen_vendor_boot.py" ]; then
@@ -35,12 +52,32 @@ jobs:
       run: |
         wget -O vendor_boot.img "${{ github.event.inputs.vendor_boot_url }}"
         
+    - name: Extract vendor_boot
+      if: github.event.inputs.extract_first == 'true'
+      run: |
+        mkdir -p unpacked_vendor_boot
+        cd unpacked_vendor_boot
+        ../magiskboot unpack ../vendor_boot.img
+        if [ -f ramdisk.cpio ]; then
+          mkdir ramdisk
+          cd ramdisk
+          cpio -idm < ../ramdisk.cpio 2>/dev/null || true
+          cd ..
+        fi
+        ls -la
+        
     - name: Generate device tree
       run: |
-        if [ -n "${{ github.event.inputs.device_name }}" ]; then
-          python transsion_twrp_gen_vendor_boot.py vendor_boot.img -o output --device-name "${{ github.event.inputs.device_name }}"
+        if [ "${{ github.event.inputs.extract_first }}" == "true" ]; then
+          INPUT_PATH="unpacked_vendor_boot"
         else
-          python transsion_twrp_gen_vendor_boot.py vendor_boot.img -o output
+          INPUT_PATH="vendor_boot.img"
+        fi
+        
+        if [ -n "${{ github.event.inputs.device_name }}" ]; then
+          python transsion_twrp_gen_vendor_boot.py "$INPUT_PATH" -o output --device-name "${{ github.event.inputs.device_name }}"
+        else
+          python transsion_twrp_gen_vendor_boot.py "$INPUT_PATH" -o output
         fi
         
     - name: Upload device tree
