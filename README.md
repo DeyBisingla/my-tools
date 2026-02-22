@@ -22,13 +22,35 @@ Workflow otomatis untuk generate device tree dan build TWRP.
 
 ## Setup
 
-1. Upload file `transsion_twrp_gen_vendor_boot.py` ke root repo
-2. Upload workflows ke `.github/workflows/`
-3. Enable GitHub Actions di repo settings
-4. Run workflows sesuai kebutuhan
+1. **WAJIB**: Upload `transsion_twrp_gen_vendor_boot.py` ke root repo GitHub
+2. Create folder `.github/workflows/` di repo
+3. Upload kedua file workflow ke `.github/workflows/`
+4. Enable GitHub Actions di repo settings (Settings → Actions → Allow all actions)
+5. Run workflows via tab Actions
+
+**Struktur repo:**
+```
+your-repo/
+├── transsion_twrp_gen_vendor_boot.py  ← WAJIB
+└── .github/
+    └── workflows/
+        ├── generate-tree.yml
+        └── build-twrp.yml
+```
 
 ## Script Manual
 
 ```bash
 python transsion_twrp_gen_vendor_boot.py vendor_boot.img -o output
 ```
+
+## Troubleshooting
+
+**Error: can't open file transsion_twrp_gen_vendor_boot.py**
+- Script belum diupload ke repo
+- Upload `transsion_twrp_gen_vendor_boot.py` ke root repo (bukan di folder)
+
+**Build gagal**
+- Pastikan device tree sudah di-generate terlebih dahulu
+- Cek codename device sudah benar
+- TWRP branch sesuai Android version device
