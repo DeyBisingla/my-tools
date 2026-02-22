@@ -1,0 +1,273 @@
+name: Build PBRP/TWRP
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_codename:
+        description: 'Device Codename (e.g., X6885)'
+        required: true
+        default: 'X6885'
+      device_manufacturer:
+        description: 'Manufacturer (e.g., infinix, tecno, itel)'
+        required: true
+        default: 'infinix'
+      build_type:
+        description: 'Build Type'
+        required: true
+        default: 'recovery'
+        type: choice
+        options:
+          - recovery
+          - boot
+          - vendorboot
+      upload_to_release:
+        description: 'Upload to Release'
+        required: true
+        default: true
+        type: boolean
+
+  push:
+    branches: [ main, master, android-12.1 ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  # Build Configuration
+  MANIFEST_URL: https://github.com/PitchBlackRecoveryProject/manifest_pb
+  MANIFEST_BRANCH: android-12.1
+  DEVICE_PATH: device/${{ github.event.inputs.device_manufacturer || 'infinix' }}/${{ github.event.inputs.device_codename || 'X6885' }}
+  TARGET_ARCH: arm64
+  TZ: Asia/Jagos
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    
+    steps:
+      # ==========================================
+      # STEP 1: Setup Environment
+      # ==========================================
+      - name: Checkout Device Tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Build Environment
+        run: |
+          echo "🔧 Setting up build environment..."
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            bc bison build-essential ccache curl flex \
+            g++-multilib gcc-multilib git gnupg gperf \
+            imagemagick lib32ncurses5-dev lib32readline-dev \
+            lib32z1-dev liblz4-tool libncurses5-dev \
+            libsdl1.2-dev libssl-dev libwxgtk3.0-gtk3-dev \
+            libxml2 libxml2-utils lzop pngcrush rsync \
+            schedtool squashfs-tools xsltproc zip zlib1g-dev \
+            libncurses5 python3 python-is-python3
+          
+          # Install repo tool
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+          
+          # Setup ccache
+          export CCACHE_COMPRESSLEVEL=5
+          export CCACHE_MAXSIZE=20G
+          ccache -M 20G
+          
+          echo "✅ Environment setup complete"
+
+      # ==========================================
+      # STEP 2: Sync PBRP Manifest
+      # ==========================================
+      - name: Sync PBRP Source
+        run: |
+          echo "📥 Syncing PBRP source code..."
+          mkdir -p ${{ github.workspace }}/workspace
+          cd ${{ github.workspace }}/workspace
+          
+          # Initialize repo
+          repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }} --git-lfs
+          
+          # Sync with optimized settings
+          repo sync -c --force-sync --optimized-fetch --no-tags --no-clone-bundle --prune -j$(nproc --all)
+          
+          echo "✅ Source sync complete"
+          
+          # Show synced source info
+          cd bootable/recovery
+          echo "PBRP Version: $(git log -1 --format=%s || echo 'Unknown')"
+
+      # ==========================================
+      # STEP 3: Place Device Tree
+      # ==========================================
+      - name: Place Device Tree
+        run: |
+          echo "📂 Placing device tree..."
+          MANUFACTURER="${{ github.event.inputs.device_manufacturer || 'infinix' }}"
+          CODENAME="${{ github.event.inputs.device_codename || 'X6885' }}"
+          DEVICE_PATH="device/$MANUFACTURER/$CODENAME"
+          
+          # Create directory structure
+          mkdir -p ${{ github.workspace }}/workspace/$DEVICE_PATH
+          
+          # Copy device tree files
+          cp -r ${{ github.workspace }}/* ${{ github.workspace }}/workspace/$DEVICE_PATH/ || true
+          
+          # Remove unnecessary files from device tree
+          cd ${{ github.workspace }}/workspace/$DEVICE_PATH
+          rm -rf .git .github *.md transsion_pbrp_gen.py 2>/dev/null || true
+          
+          echo "✅ Device tree placed at: $DEVICE_PATH"
+          echo "📋 Device tree contents:"
+          ls -la ${{ github.workspace }}/workspace/$DEVICE_PATH/
+
+      # ==========================================
+      # STEP 4: Build PBRP
+      # ==========================================
+      - name: Build PBRP
+        run: |
+          cd ${{ github.workspace }}/workspace
+          
+          MANUFACTURER="${{ github.event.inputs.device_manufacturer || 'infinix' }}"
+          CODENAME="${{ github.event.inputs.device_codename || 'X6885' }}"
+          
+          echo "🔨 Starting build for $MANUFACTURER $CODENAME..."
+          
+          # Source build environment
+          source build/envsetup.sh
+          
+          # Lunch target
+          lunch pb_$CODENAME-eng
+          
+          # Build with ccache
+          export USE_CCACHE=1
+          export CCACHE_EXEC=/usr/bin/ccache
+          
+          # Start build
+          mka -j$(nproc --all) ${{ github.event.inputs.build_type || 'recovery' }}image
+          
+          echo "✅ Build complete!"
+
+      # ==========================================
+      # STEP 5: Prepare Artifacts
+      # ==========================================
+      - name: Prepare Artifacts
+        run: |
+          cd ${{ github.workspace }}/workspace
+          
+          MANUFACTURER="${{ github.event.inputs.device_manufacturer || 'infinix' }}"
+          CODENAME="${{ github.event.inputs.device_codename || 'X6885' }}"
+          DEVICE_PATH="device/$MANUFACTURER/$CODENAME"
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'recovery' }}"
+          
+          # Create output directory
+          mkdir -p ${{ github.workspace }}/output
+          
+          # Find and copy built images
+          OUT_DIR="out/target/product/$CODENAME"
+          
+          if [ "$BUILD_TYPE" == "recovery" ]; then
+            # For recovery image
+            if [ -f "$OUT_DIR/recovery.img" ]; then
+              cp "$OUT_DIR/recovery.img" "${{ github.workspace }}/output/recovery.img"
+              echo "✅ Found recovery.img"
+            fi
+            
+            # For vendor_boot + recovery (Android 12+)
+            if [ -f "$OUT_DIR/vendor_boot.img" ]; then
+              cp "$OUT_DIR/vendor_boot.img" "${{ github.workspace }}/output/vendor_boot.img"
+              echo "✅ Found vendor_boot.img"
+            fi
+            
+          elif [ "$BUILD_TYPE" == "boot" ]; then
+            if [ -f "$OUT_DIR/boot.img" ]; then
+              cp "$OUT_DIR/boot.img" "${{ github.workspace }}/output/boot.img"
+              echo "✅ Found boot.img"
+            fi
+            
+          elif [ "$BUILD_TYPE" == "vendorboot" ]; then
+            if [ -f "$OUT_DIR/vendor_boot.img" ]; then
+              cp "$OUT_DIR/vendor_boot.img" "${{ github.workspace }}/output/vendor_boot.img"
+              echo "✅ Found vendor_boot.img"
+            fi
+          fi
+          
+          # Copy any .img files found
+          find $OUT_DIR -name "*.img" -type f -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+          
+          # Create info file
+          cat > ${{ github.workspace }}/output/build_info.txt << EOF
+          Build Date: $(date '+%Y-%m-%d %H:%M:%S')
+          Device: $MANUFACTURER $CODENAME
+          Build Type: $BUILD_TYPE
+          PBRP Branch: ${{ env.MANIFEST_BRANCH }}
+          Commit: ${{ github.sha }}
+          Workflow Run: ${{ github.run_id }}
+          EOF
+          
+          echo "📦 Output files:"
+          ls -lh ${{ github.workspace }}/output/
+
+      # ==========================================
+      # STEP 6: Upload Artifacts
+      # ==========================================
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PBRP-${{ github.event.inputs.device_codename || 'X6885' }}-${{ github.run_number }}
+          path: ${{ github.workspace }}/output/*
+          if-no-files-found: error
+          retention-days: 30
+
+      # ==========================================
+      # STEP 7: Create Release (Optional)
+      # ==========================================
+      - name: Create Release
+        if: github.event.inputs.upload_to_release == 'true' && github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: PBRP-${{ github.event.inputs.device_codename || 'X6885' }}-${{ github.run_number }}
+          name: PBRP for ${{ github.event.inputs.device_manufacturer || 'infinix' }} ${{ github.event.inputs.device_codename || 'X6885' }}
+          body: |
+            ## PBRP Build for ${{ github.event.inputs.device_manufacturer || 'infinix' }} ${{ github.event.inputs.device_codename || 'X6885' }}
+            
+            ### Build Information
+            - **Device:** ${{ github.event.inputs.device_manufacturer || 'infinix' }} ${{ github.event.inputs.device_codename || 'X6885' }}
+            - **Build Type:** ${{ github.event.inputs.build_type || 'recovery' }}
+            - **Build Date:** ${{ github.event.inputs.device_codename || 'X6885' }}
+            - **PBRP Branch:** ${{ env.MANIFEST_BRANCH }}
+            - **Commit:** ${{ github.sha }}
+            
+            ### Installation
+            1. Download the appropriate image for your device
+            2. Flash via fastboot: `fastboot flash ${{ github.event.inputs.build_type || 'recovery' }} <filename>.img`
+            3. Reboot to recovery: `fastboot reboot recovery`
+            
+            ### Notes
+            - This is an automated build
+            - Test thoroughly before using
+            - Report issues to the device repository
+            
+          files: ${{ github.workspace }}/output/*
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ==========================================
+      # STEP 8: Cleanup
+      # ==========================================
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Cleaning up..."
+          rm -rf ${{ github.workspace }}/workspace
+          echo "✅ Cleanup complete"
