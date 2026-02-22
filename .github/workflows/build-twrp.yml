@@ -23,7 +23,8 @@ jobs:
     steps:
     - name: Checkout device tree
       uses: actions/checkout@v4
-      path: device
+      with:
+        path: device
       
     - name: Setup environment
       run: |
