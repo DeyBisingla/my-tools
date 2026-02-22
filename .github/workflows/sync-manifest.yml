@@ -1,0 +1,25 @@
+name: Sync PBRP Manifest
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly sync
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Sync PBRP Manifest
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          
+          mkdir -p /tmp/pbrp-sync
+          cd /tmp/pbrp-sync
+          
+          repo init --depth=1 -u https://github.com/PitchBlackRecoveryProject/manifest_pb -b android-12.1
+          repo sync -c --force-sync --optimized-fetch --no-tags --no-clone-bundle --prune -j$(nproc --all)
+          
+          echo "✅ Manifest synced successfully"
