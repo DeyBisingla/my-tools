@@ -58,13 +58,24 @@ jobs:
         mkdir -p unpacked_vendor_boot
         cd unpacked_vendor_boot
         ../magiskboot unpack ../vendor_boot.img
+        
+        echo "=== After magiskboot unpack ==="
+        ls -la
+        
         if [ -f ramdisk.cpio ]; then
           mkdir ramdisk
           cd ramdisk
           cpio -idm < ../ramdisk.cpio 2>/dev/null || true
+          echo "=== After cpio extract ==="
+          ls -la
           cd ..
+        else
+          echo "WARNING: ramdisk.cpio not found"
         fi
-        ls -la
+        
+        cd ..
+        echo "=== Final unpacked_vendor_boot contents ==="
+        find unpacked_vendor_boot -type f | head -20
         
     - name: Generate device tree
       run: |
@@ -74,10 +85,27 @@ jobs:
           INPUT_PATH="vendor_boot.img"
         fi
         
+        echo "=== Input path: $INPUT_PATH ==="
+        ls -la "$INPUT_PATH" || echo "Path not found"
+        
         if [ -n "${{ github.event.inputs.device_name }}" ]; then
-          python transsion_twrp_gen_vendor_boot.py "$INPUT_PATH" -o output --device-name "${{ github.event.inputs.device_name }}"
+          python transsion_twrp_gen_vendor_boot.py "$INPUT_PATH" -o output --device-name "${{ github.event.inputs.device_name }}" -v
         else
-          python transsion_twrp_gen_vendor_boot.py "$INPUT_PATH" -o output
+          python transsion_twrp_gen_vendor_boot.py "$INPUT_PATH" -o output -v
+        fi
+        
+        echo "=== Generation complete, checking output ==="
+        ls -la output/ || echo "No output generated"
+        
+    - name: Check output
+      run: |
+        echo "=== Checking output directory ==="
+        ls -la output/ || echo "output/ not found"
+        if [ -d "output/TWRP" ]; then
+          ls -la output/TWRP/
+        else
+          echo "output/TWRP/ not found, checking alternatives..."
+          find output -type d 2>/dev/null || true
         fi
         
     - name: Upload device tree
@@ -85,12 +113,18 @@ jobs:
       with:
         name: device-tree
         path: output/
+        if-no-files-found: warn
         
     - name: Create commit
+      continue-on-error: true
       run: |
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        cp -r output/TWRP/* .
-        git add .
-        git commit -m "Auto: Generate device tree from vendor_boot" || echo "No changes"
-        git push || echo "Nothing to push"
+        if [ -d "output/TWRP" ]; then
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          cp -r output/TWRP/* .
+          git add .
+          git commit -m "Auto: Generate device tree from vendor_boot" || echo "No changes to commit"
+          git push || echo "Nothing to push"
+        else
+          echo "output/TWRP/ not found, skipping commit"
+        fi
